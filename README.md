@@ -30,7 +30,7 @@ dsh-header-status/
 
    ```yaml
    - id: dsh-header-status
-     name: ./plugins/dsh-header-status
+     name: ./plugins/dsh-header-status/lib/index.js
    ```
 
 3. 重启 DSH Web。重启后标题栏右侧即出现状态条。
