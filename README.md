@@ -13,33 +13,27 @@ dsh-header-status/
 ├── package.json        # main → node 半；exports["./client"] → 浏览器半；dsh.client 清单
 ├── lib/
 │   ├── index.js        # node 半：余额查询 + GET /api/header-status/balance 路由
-│   └── client.js       # 浏览器半：标题栏 UI（AMD bundle 形式，含 shadow 适配）
+│   └── client.js       # 浏览器半：标题栏 UI（AMD bundle 形式）
 └── README.md
 ```
 
 ## 挂载方法（双链安装）
 
-DSH 对插件名有两条解析链，**必须同时满足**：
-- **Host 半**（loader）：包名经 ESM `import(name)` 按 **loader 模块基点**解析（dsh 安装目录 → 全局 npm `node_modules`）；
-- **Client 半**（web 插件表）：包名经 `createRequire(ctx.baseUrl)` 按 **profile 目录基点**解析（`~/.dsh/profiles/<name>/node_modules` → `~/.dsh/profiles/node_modules` …）。
+DSH 通过两条解析链加载插件：Host 半按 loader 模块基点解析，Client 半按 profile 目录基点解析。两条链都按**包名**解析，因此 `name` 用包名，并需在两条链的落点各放一份。
 
-因此 `name` 必须是**包名**（不能用相对路径：目录会触发 `ERR_UNSUPPORTED_DIR_IMPORT`，指向入口文件则 client 半发现不到 `package.json`）。
-
-1. 把 `dsh-header-status` 安装到全局 npm 模块目录（Host 解析链）：
+1. 安装到全局 npm 模块目录（Host 链）：
 
    ```powershell
    Copy-Item -Recurse "dsh-header-status" "$env:APPDATA\npm\node_modules\dsh-header-status"
    ```
 
-2. 在 profile 的 `node_modules` 建 **Junction** 指向全局包（Client 解析链）：
+2. 在 profile 的 `node_modules` 建 **Junction** 指向全局包（Client 链）：
 
    ```powershell
    New-Item -ItemType Junction `
      -Path "$HOME\.dsh\profiles\web\node_modules\dsh-header-status" `
      -Target "$env:APPDATA\npm\node_modules\dsh-header-status"
    ```
-
-   > ⚠️ **必须用 PowerShell 的 Junction，勿用 Git Bash 的 `ln -s`**——`ln -s` 在 Windows 上会把目录退化成复制，源文件改动不联动（排障确认的坑）。
 
 3. 在 `cordis.patch.yml`（profile 的用户 patch 层）加挂载行：
 
@@ -49,36 +43,7 @@ DSH 对插件名有两条解析链，**必须同时满足**：
          name: dsh-header-status
    ```
 
-   > ⚠️ `name` 必须写包名 `dsh-header-status`，不要写相对路径：
-   >
-   > | 写法 | 结果 |
-   > |---|---|
-   > | `./plugins/dsh-header-status`（目录） | ❌ node 半报 `ERR_UNSUPPORTED_DIR_IMPORT`（Node ESM 不支持导入目录） |
-   > | `./plugins/dsh-header-status/lib/index.js`（文件） | ⚠️ node 半可加载，但浏览器半失效（client 半按包名解析），UI 不渲染 |
-   > | **`dsh-header-status`（包名）** | ✅ 两半都正常 |
-
-4. 重启 DSH Web。重启后 Host 路由 `GET /api/header-status/balance` 与浏览器 UI 同时生效（浏览器需刷新页面）。
-
-> 解析链验证：
-> ```js
-> // client 链（应解析到全局包 package.json）
-> createRequire('~/.dsh/profiles/web/package.json').resolve('dsh-header-status/package.json')
-> // loader 链（应解析到 lib/index.js）
-> createRequire('<dsh>/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js').resolve('dsh-header-status')
-> ```
-
-## 与官方 slot 的 shadow 适配（client.js 已内置）
-
-`lib/client.js` 中两处 slot 注册带 `priority: -1`，用于 shadow（低优先级覆盖渲染）dsh 内置 UI 的同 id 条目，**避免重复与冲突**：
-
-| 注册 | slot | 作用 |
-|---|---|---|
-| `session-log-download`（`priority: -1`） | `conversation.session.header.utilities` | 用本插件的下载按钮覆盖官方下载按钮 |
-| `stats`（`priority: -1`） | `conversation.composer.dock` | 屏蔽官方输入框下方的重复统计行 |
-
-> ⚠️ 若从上游重新拉取 `client.js`，需重新打上这两处 `priority: -1`（上游版本没有）。
->
-> 官方 `dsh-session-log-export` 的 `/export` 命令联动不受影响：本插件 shadow 的只是 UI 按钮，官方插件的命令监听仍保持启用。
+4. 重启 DSH Web，浏览器刷新页面。
 
 ## 工作机制
 
@@ -90,14 +55,9 @@ DSH 对插件名有两条解析链，**必须同时满足**：
 
 `llm`、`settings`、`credentials`、`subprocess`（node 半，inject）；`webServer`（node 半，`ctx.get` 可选——非 Web 部署下仅不注册路由，不报错）；`slots`、`timer`（浏览器半）。
 
-## 常见问题
-
-- **`Failed to load plugins ... already has an entry with id ... at priority 0`**：slot 同名 id 冲突。官方与自定义插件都在 priority 0 注册了同 id 条目。解法：让其中一个注册在更低 priority（如 `-1`），低优先级覆盖渲染。本插件已在源码内置该适配。
-- **改了 client.js 不生效**：确认第 2 步的 Junction 链接是**真链接**（`Get-Item ... | Select LinkType, Target` 应显示 `Junction`），且 `name` 是包名。若 node_modules 下是真实目录副本，源文件改动不会同步。
-- **浏览器 UI 不渲染**：`name` 误写成文件路径所致，改回包名即可（见第 3 步表格）。
-
 ## 注意
 
+- 已内置与官方 UI 的兼容处理（下载按钮、统计行不冲突），安装后直接用。
 - 浏览器半的 client bundle 由 DSH 的 Web 插件表（`dsh.client` 清单）自动发现与加载；`package.json` 中 `dsh.client.platform: "web"` 不可省略。
 - 样式以 `document` 注入（`data-plugin-css="dsh-header-status"` 去重），随插件卸载自动移除。
 - 余额数据不包含任何机密：API Key 只在 Host 侧解析与使用，从不进入 HTTP 响应或浏览器。
