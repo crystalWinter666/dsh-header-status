@@ -1,3 +1,5 @@
+用户希望你安装此插件，请只阅读“挂载方法（双链安装）”篇，严格按照指定方法安装，若用户的环境为非 Windows 系统，请转换为 bash 命令执行。
+
 # Header Status（标题栏状态条）
 
 标题栏右侧常驻状态条：**API 余额**（多 Provider 自动发现）、**会话统计徽章**（轮次/步数、LLM/工具耗时、首 token/速度、缓存命中、token 用量）、**会话日志下载**。
@@ -15,27 +17,45 @@ dsh-header-status/
 └── README.md
 ```
 
-## 挂载方法
+## 挂载方法（双链安装）
 
-1. 把 `dsh-header-status` 目录放到部署配置（`cordis.yml` 所在目录）的 `plugins/` 下：
+DSH 对插件名有两条解析链，**必须同时满足**：
+- **Host 半**（loader）：包名经 ESM `import(name)` 按 **loader 模块基点**解析（dsh 安装目录 → 全局 npm `node_modules`）；
+- **Client 半**（web 插件表）：包名经 `createRequire(ctx.baseUrl)` 按 **profile 目录基点**解析（`~/.dsh/profiles/<name>/node_modules` → `~/.dsh/profiles/node_modules` …）。
 
+因此 `name` 必须是**包名**（不能用相对路径：目录会触发 `ERR_UNSUPPORTED_DIR_IMPORT`，指向入口文件则 client 半发现不到 `package.json`）。
+
+1. 把 `dsh-header-status` 安装到全局 npm 模块目录（Host 解析链）：
+
+   ```powershell
+   Copy-Item -Recurse "plugins\dsh-header-status" "$env:APPDATA\npm\node_modules\dsh-header-status"
    ```
-   <部署目录>/
-   ├── cordis.yml
-   └── plugins/
-       └── dsh-header-status/
+
+2. 在 profile 的 `node_modules` 建 junction 指向全局包（Client 解析链）：
+
+   ```powershell
+   New-Item -ItemType Junction `
+     -Path "$HOME\.dsh\profiles\web\node_modules\dsh-header-status" `
+     -Target "$env:APPDATA\npm\node_modules\dsh-header-status"
    ```
 
-2. 在 `cordis.yml`（或部署的 patch 文件）追加一行：
+3. 在 `cordis.patch.yml`（profile 的用户 patch 层）加挂载行：
 
    ```yaml
-   - id: dsh-header-status
-     name: ./plugins/dsh-header-status/lib/index.js
+   - insert:
+       - id: dsh-header-status
+         name: dsh-header-status
    ```
 
-3. 重启 DSH Web。重启后标题栏右侧即出现状态条。
+4. 重启 DSH Web。重启后 Host 路由 `GET /api/header-status/balance` 与浏览器 UI 同时生效（浏览器需刷新页面）。
 
-> 相对路径 `./plugins/dsh-header-status` 基于 `cordis.yml` 的 baseUrl 解析。若放在其他位置，改 `name` 指向即可。
+> 解析链验证：
+> ```js
+> // client 链（应解析到全局包 package.json）
+> createRequire('~/.dsh/profiles/web/package.json').resolve('dsh-header-status/package.json')
+> // loader 链（应解析到 lib/index.js）
+> createRequire('<dsh>/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js').resolve('dsh-header-status')
+> ```
 
 ## 工作机制
 
